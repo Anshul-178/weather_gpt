@@ -19,6 +19,11 @@ dependencies:
   flutter_tts: ^4.2.5
   speech_to_text: ^7.4.0
   audioplayers: ^6.7.1
+  # On-device LLM (Gemma 3 1B int4, MediaPipe .task engine built in).
+  # Pinned: 0.12.6 is the newest release compatible with this project's
+  # Dart SDK — newer versions require Dart >=3.10/3.12, Flutter >=3.44
+  # and native assets, and split the engine into flutter_gemma_mediapipe.
+  flutter_gemma: 0.12.6
 
 dev_dependencies:
   flutter_test:

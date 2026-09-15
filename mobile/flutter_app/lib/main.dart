@@ -10,10 +10,14 @@ import 'screens/forecast_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/settings_screen.dart';
 import 'services/api_service.dart';
+import 'services/local_ai_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await AppConfig.init();
+  // Initialize the on-device AI plugin (loads prefs; loads the model lazily
+  // only when a local answer is first requested).
+  await LocalAiService.instance.init();
   runApp(const WeatherGPTApp());
 }
 

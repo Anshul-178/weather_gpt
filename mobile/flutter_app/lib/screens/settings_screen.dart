@@ -1,3 +1,6 @@
+import 'dart:io' show Platform;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -6,6 +9,7 @@ import '../providers/app_state.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../repositories/weather_repository.dart';
 import '../services/api_service.dart';
+import '../services/local_ai_service.dart';
 
 /// Settings screen: activity scores and preferences.
 class SettingsScreen extends StatefulWidget {
@@ -40,6 +44,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _apiUrlController = TextEditingController();
   bool _savingUrl = false;
   String? _urlStatus;
+
+  // On-device AI (Gemma 3 1B int4 via flutter_gemma).
+  bool _localAiEnabled = false;
+  bool _modelDownloaded = false;
+  bool _downloadingModel = false;
+  int _downloadProgress = 0;
+  String? _localAiStatus;
+  final _hfTokenController = TextEditingController();
 
   /// Registers this device for push alerts. The FCM token normally comes
   /// from firebase_messaging; when Firebase is not configured the device is
@@ -115,6 +127,101 @@ class _SettingsScreenState extends State<SettingsScreen> {
   void initState() {
     super.initState();
     _apiUrlController.text = AppConfig.apiBaseUrl;
+    _loadLocalAiState();
+  }
+
+  Future<void> _loadLocalAiState() async {
+    if (!kIsWeb && !Platform.isAndroid && !Platform.isIOS) {
+      // On-device LLM is only supported on mobile; skip plugin calls.
+      return;
+    }
+    final local = LocalAiService.instance;
+    try {
+      await local.init();
+    } catch (_) {
+      return;
+    }
+    if (!mounted) return;
+    setState(() {
+      _localAiEnabled = local.enabled;
+      _hfTokenController.text = local.hfToken ?? '';
+    });
+    try {
+      final downloaded = await local.isModelDownloaded();
+      if (mounted) setState(() => _modelDownloaded = downloaded);
+    } catch (_) {
+      // Model storage unavailable (e.g. tests) — leave as not downloaded.
+    }
+  }
+
+  Future<void> _toggleLocalAi(bool value) async {
+    final local = LocalAiService.instance;
+    await local.setEnabled(value);
+    if (!mounted) return;
+    setState(() {
+      _localAiEnabled = value;
+      _localAiStatus = value
+          ? (_modelDownloaded
+              ? 'On-device AI on. Chat uses the local Gemma model.'
+              : 'Enabled — download the model below to use it.')
+          : 'On-device AI off. Chat uses the WeatherGPT server.';
+    });
+  }
+
+  Future<void> _downloadLocalModel() async {
+    setState(() {
+      _downloadingModel = true;
+      _downloadProgress = 0;
+      _localAiStatus = 'Downloading model…';
+    });
+    try {
+      await LocalAiService.instance.downloadModel((p) {
+        if (mounted && p != _downloadProgress) {
+          setState(() => _downloadProgress = p);
+        }
+      });
+      if (!mounted) return;
+      final downloaded = await LocalAiService.instance.isModelDownloaded();
+      setState(() {
+        _modelDownloaded = downloaded;
+        _localAiStatus = downloaded
+            ? 'Model ready. On-device answers work offline.'
+            : 'Download did not finish. Try again.';
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _localAiStatus = e.toString().contains('401') ||
+                e.toString().contains('403')
+            ? 'Download unauthorized — check your Hugging Face token '
+                '(accept the Gemma license on the model page first).'
+            : 'Download failed: $e';
+      });
+    } finally {
+      if (mounted) setState(() => _downloadingModel = false);
+    }
+  }
+
+  Future<void> _deleteLocalModel() async {
+    setState(() => _localAiStatus = 'Deleting model…');
+    try {
+      await LocalAiService.instance.deleteModel();
+      if (!mounted) return;
+      setState(() {
+        _modelDownloaded = false;
+        _localAiStatus = 'Model deleted. $kLocalModelLabel storage freed.';
+      });
+    } catch (e) {
+      if (mounted) setState(() => _localAiStatus = 'Delete failed: $e');
+    }
+  }
+
+  Future<void> _saveHfToken() async {
+    setState(() => _localAiStatus = 'Saving Hugging Face token…');
+    await LocalAiService.instance.setHfToken(_hfTokenController.text);
+    if (mounted) {
+      setState(() => _localAiStatus = 'Token saved. You can download the model now.');
+    }
   }
 
   Future<void> _logout() async {
@@ -345,6 +452,111 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         color: _urlStatus!.startsWith('Saved')
                             ? Theme.of(context).colorScheme.primary
                             : Theme.of(context).colorScheme.error),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 24),
+        const _SectionHeader(
+          title: 'On-device AI',
+          subtitle: 'Run Gemma 3 1B locally — private, offline, no API bills',
+        ),
+        const SizedBox(height: 10),
+        Card(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Answers are generated on this phone by a small Gemma model '
+                  '(~0.5 GB download, ~1.5 GB RAM while running). Works '
+                  'offline and never sends your questions to a server. If '
+                  'the model can\'t answer, chat falls back to the '
+                  'WeatherGPT backend automatically.',
+                  style: Theme.of(context).textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('Use on-device AI for chat'),
+                  subtitle: Text(_modelDownloaded
+                      ? 'Gemma 3 1B downloaded — ready for offline chat'
+                      : 'Model not downloaded yet'),
+                  value: _localAiEnabled,
+                  onChanged: _toggleLocalAi,
+                ),
+                const Divider(),
+                Text(
+                  'Model file (Gemma 3 1B int4, ~0.5 GB)',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
+                const SizedBox(height: 8),
+                if (_downloadingModel)
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      LinearProgressIndicator(value: _downloadProgress / 100),
+                      const SizedBox(height: 6),
+                      Text('Downloading… $_downloadProgress%',
+                          style: Theme.of(context).textTheme.bodySmall),
+                    ],
+                  )
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _modelDownloaded ? null : _downloadLocalModel,
+                          icon: const Icon(Icons.download_rounded),
+                          label: Text(_modelDownloaded
+                              ? 'Model downloaded ✓'
+                              : 'Download model (~0.5 GB)'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      IconButton(
+                        tooltip: 'Delete model',
+                        onPressed:
+                            _modelDownloaded ? _deleteLocalModel : null,
+                        icon: const Icon(Icons.delete_outline),
+                      ),
+                    ],
+                  ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: _hfTokenController,
+                  obscureText: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Hugging Face token (free, for the download)',
+                    hintText: 'hf_...',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    onPressed: _saveHfToken,
+                    icon: const Icon(Icons.key_outlined, size: 18),
+                    label: const Text('Save token'),
+                  ),
+                ),
+                Text(
+                  'The Gemma model is license-gated: accept the license at '
+                  'huggingface.co/litert-community/Gemma3-1B-IT (free account), '
+                  'create a read token, and paste it here. The token stays on '
+                  'this device.',
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                if (_localAiStatus != null) ...[
+                  const SizedBox(height: 10),
+                  Text(
+                    _localAiStatus!,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),
                 ],
               ],
