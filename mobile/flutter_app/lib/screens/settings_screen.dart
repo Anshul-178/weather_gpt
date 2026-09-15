@@ -2,7 +2,6 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show AssetManifest, rootBundle;
 import 'package:provider/provider.dart';
 
 import '../config.dart';
@@ -46,16 +45,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _savingUrl = false;
   String? _urlStatus;
 
-  // On-device AI (Gemma 3 1B int4 via flutter_gemma).
+  // On-device AI (Gemma 3 1B GGUF via llama.cpp / llama_flutter_android).
   bool _localAiEnabled = false;
   bool _modelDownloaded = false;
-  /// True when the model .task file was bundled into this APK
-  /// (assets/models/) — then no in-app download is ever needed.
+  /// True when the model GGUF was bundled into this APK (assets/models/) —
+  /// then nothing is ever downloaded; it installs from the app itself.
   bool _modelBundled = false;
-  bool _downloadingModel = false;
-  int _downloadProgress = 0;
   String? _localAiStatus;
-  final _hfTokenController = TextEditingController();
 
   /// Registers this device for push alerts. The FCM token normally comes
   /// from firebase_messaging; when Firebase is not configured the device is
@@ -148,20 +144,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     if (!mounted) return;
     setState(() {
       _localAiEnabled = local.enabled;
-      _hfTokenController.text = local.hfToken ?? '';
+      _modelBundled = local.isModelBundled;
     });
     try {
       final downloaded = await local.isModelDownloaded();
       if (mounted) setState(() => _modelDownloaded = downloaded);
     } catch (_) {
       // Model storage unavailable (e.g. tests) — leave as not downloaded.
-    }
-    try {
-      final manifest = await AssetManifest.loadFromAssetBundle(rootBundle);
-      final bundled = manifest.listAssets().contains(kLocalModelAssetPath);
-      if (mounted) setState(() => _modelBundled = bundled);
-    } catch (_) {
-      // Manifest unavailable — leave as not bundled.
     }
   }
 
@@ -177,44 +166,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
               : _modelBundled
                   ? 'Enabled — the model ships in this app and installs '
                       'automatically on first chat.'
-                  : 'Enabled — download the model below to use it.')
+                  : 'Enabled, but this build has no bundled model file, so '
+                      'chat uses the WeatherGPT server.')
           : 'On-device AI off. Chat uses the WeatherGPT server.';
     });
   }
 
-  Future<void> _downloadLocalModel() async {
-    setState(() {
-      _downloadingModel = true;
-      _downloadProgress = 0;
-      _localAiStatus = 'Downloading model…';
-    });
-    try {
-      await LocalAiService.instance.downloadModel((p) {
-        if (mounted && p != _downloadProgress) {
-          setState(() => _downloadProgress = p);
-        }
-      });
-      if (!mounted) return;
-      final downloaded = await LocalAiService.instance.isModelDownloaded();
-      setState(() {
-        _modelDownloaded = downloaded;
-        _localAiStatus = downloaded
-            ? 'Model ready. On-device answers work offline.'
-            : 'Download did not finish. Try again.';
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _localAiStatus = e.toString().contains('401') ||
-                e.toString().contains('403')
-            ? 'Download unauthorized — check your Hugging Face token '
-                '(accept the Gemma license on the model page first).'
-            : 'Download failed: $e';
-      });
-    } finally {
-      if (mounted) setState(() => _downloadingModel = false);
-    }
-  }
 
   Future<void> _deleteLocalModel() async {
     setState(() => _localAiStatus = 'Deleting model…');
@@ -223,22 +180,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (!mounted) return;
       setState(() {
         _modelDownloaded = false;
-        _localAiStatus = _modelBundled
-            ? 'Model deleted. It will be re-installed from the app on next use.'
-            : 'Model deleted. $kLocalModelLabel storage freed.';
+        _localAiStatus =
+            'Model deleted. It will be re-installed from the app on next use.';
       });
     } catch (e) {
       if (mounted) setState(() => _localAiStatus = 'Delete failed: $e');
     }
   }
 
-  Future<void> _saveHfToken() async {
-    setState(() => _localAiStatus = 'Saving Hugging Face token…');
-    await LocalAiService.instance.setHfToken(_hfTokenController.text);
-    if (mounted) {
-      setState(() => _localAiStatus = 'Token saved. You can download the model now.');
-    }
-  }
 
   Future<void> _logout() async {
     final app = context.read<AppState>();
@@ -251,11 +200,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _clearLocation() async {
+    final messenger = ScaffoldMessenger.of(context);
+    final app = context.read<AppState>();
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('lat');
     await prefs.remove('lon');
     await prefs.remove('loc_name');
-    final app = context.read<AppState>();
     app.location = null;
     app.current = null;
     app.hourly = [];
@@ -263,7 +213,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     app.error = null;
     app.location = app.location; // trigger rebuild
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    messenger.showSnackBar(
       SnackBar(
         content: const Text('Saved location cleared. Pick a new one on the Home screen.'),
         duration: const Duration(seconds: 3),
@@ -489,17 +439,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text(
                   _modelBundled
                       ? 'Answers are generated on this phone by the Gemma '
-                          'model built into this app (~1.5 GB RAM while '
-                          'running). Works offline and never sends your '
-                          'questions to a server. If the model can\'t '
-                          'answer, chat falls back to the WeatherGPT '
-                          'backend automatically.'
-                      : 'Answers are generated on this phone by a small '
-                          'Gemma model (~0.5 GB download, ~1.5 GB RAM while '
-                          'running). Works offline and never sends your '
-                          'questions to a server. If the model can\'t '
-                          'answer, chat falls back to the WeatherGPT '
-                          'backend automatically.',
+                          'model built into this app (GGUF via llama.cpp, '
+                          '~1.5 GB RAM while running). Works offline and '
+                          'never sends your questions to a server. If the '
+                          'model can\'t answer, chat falls back to the '
+                          'WeatherGPT backend automatically.'
+                      : 'This build does not include the on-device model '
+                          '(assets/models/ has no .gguf), so chat uses the '
+                          'WeatherGPT backend.',
                   style: Theme.of(context).textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 8),
@@ -511,29 +458,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       : _modelBundled
                           ? 'Gemma 3 1B is built into this app — just turn '
                               'this on and chat'
-                          : 'Model not downloaded yet'),
+                          : 'Model not included in this build'),
                   value: _localAiEnabled,
                   onChanged: _toggleLocalAi,
                 ),
                 const Divider(),
                 Text(
                   _modelBundled
-                      ? 'Model (Gemma 3 1B int4, built into the app)'
-                      : 'Model file (Gemma 3 1B int4, ~0.5 GB)',
+                      ? 'Model (Gemma 3 1B GGUF, built into the app)'
+                      : 'Model file (Gemma 3 1B GGUF, missing from this build)',
                   style: Theme.of(context).textTheme.titleSmall,
                 ),
                 const SizedBox(height: 8),
-                if (_downloadingModel)
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      LinearProgressIndicator(value: _downloadProgress / 100),
-                      const SizedBox(height: 6),
-                      Text('Downloading… $_downloadProgress%',
-                          style: Theme.of(context).textTheme.bodySmall),
-                    ],
-                  )
-                else if (_modelBundled)
+                if (_modelBundled)
                   Row(
                     children: [
                       Expanded(
@@ -555,59 +492,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ],
                   )
                 else
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton.icon(
-                          onPressed: _modelDownloaded ? null : _downloadLocalModel,
-                          icon: const Icon(Icons.download_rounded),
-                          label: Text(_modelDownloaded
-                              ? 'Model downloaded ✓'
-                              : 'Download model (~0.5 GB)'),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      IconButton(
-                        tooltip: 'Delete model',
-                        onPressed:
-                            _modelDownloaded ? _deleteLocalModel : null,
-                        icon: const Icon(Icons.delete_outline),
-                      ),
-                    ],
+                  Text(
+                    'Model file missing from this build: place '
+                    '$kLocalModelId in assets/models/ and rebuild the app '
+                    '(see assets/models/README.md).',
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.error),
                   ),
                 if (_modelBundled) ...[
                   const SizedBox(height: 12),
                   Text(
-                    'This APK includes the model — no download or token '
-                    'needed. The fallback download appears only when the '
-                    'model is not bundled.',
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: Theme.of(context).colorScheme.onSurfaceVariant),
-                  ),
-                ] else ...[
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: _hfTokenController,
-                    obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Hugging Face token (free, for the download)',
-                      hintText: 'hf_...',
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      onPressed: _saveHfToken,
-                      icon: const Icon(Icons.key_outlined, size: 18),
-                      label: const Text('Save token'),
-                    ),
-                  ),
-                  Text(
-                    'This build does not include the model file: accept the '
-                    'license at huggingface.co/litert-community/Gemma3-1B-IT '
-                    '(free account), create a read token, paste it here, then '
-                    'download. The token stays on this device.',
+                    'This APK includes the model — nothing is downloaded and '
+                    'no token is needed. First chat copies it from the app '
+                    'into storage (one time, a few seconds).',
                     style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: Theme.of(context).colorScheme.onSurfaceVariant),
                   ),

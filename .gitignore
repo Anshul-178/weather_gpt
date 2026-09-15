@@ -28,6 +28,9 @@ mobile/flutter_app/build/
 mobile/flutter_app/.metadata
 mobile/flutter_app/flutter_*.log
 mobile/flutter_app/coverage/
+# Model files are handled per-app: the bundled GGUF lives (git-ignored) in
+# mobile/flutter_app/assets/models/ and IS packaged into the APK.
+mobile/flutter_app/models/
 mobile/flutter_app/.packages
 mobile/flutter_app/pubspec_overrides.yaml
 

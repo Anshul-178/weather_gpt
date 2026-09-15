@@ -19,11 +19,10 @@ dependencies:
   flutter_tts: ^4.2.5
   speech_to_text: ^7.4.0
   audioplayers: ^6.7.1
-  # On-device LLM (Gemma 3 1B int4, MediaPipe .task engine built in).
-  # Pinned: 0.12.6 is the newest release compatible with this project's
-  # Dart SDK — newer versions require Dart >=3.10/3.12, Flutter >=3.44
-  # and native assets, and split the engine into flutter_gemma_mediapipe.
-  flutter_gemma: 0.12.6
+  # On-device LLM: llama.cpp engine running GGUF models (Android).
+  # The Gemma 3 1B GGUF ships bundled inside the APK (assets/models/) —
+  # no in-app download and no Hugging Face token at runtime.
+  llama_flutter_android: ^0.2.6
 
 dev_dependencies:
   flutter_test:
@@ -33,9 +32,10 @@ dev_dependencies:
 flutter:
   uses-material-design: true
 
-  # Bundled on-device AI model (Gemma 3 1B int4 .task, ~0.5 GB).
-  # The actual .task file is NOT committed to git — see assets/models/README.md
-  # for the one-time manual step of dropping it here before building the APK.
-  # If the file is missing, the app falls back to the in-app download flow.
+  # Bundled on-device AI model (Gemma 3 1B int4 GGUF, ~769 MB).
+  # The .gguf file is NOT committed to git — see assets/models/README.md for
+  # the one-time manual step of dropping it here before building the APK.
+  # If the file is missing, the app still builds; on-device AI simply reports
+  # that the model is not included in that build.
   assets:
     - assets/models/

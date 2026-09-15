@@ -16,17 +16,21 @@ runtime in **Settings → Backend URL**.
 
 ## Bundled on-device AI model (no in-app download)
 
-The Gemma 3 1B model can ship **inside the APK** so users never download
-anything after installing:
+The Gemma 3 1B GGUF ships **inside the APK** and runs on-device via
+**llama.cpp** (`llama_flutter_android`) — users never download anything after
+installing and no Hugging Face token exists in the app:
 
-1. Accept the license and download
-   `Gemma3-1B-IT_multi-prefill-seq_q4_block128_ekv1280.task` (~0.5 GB) from
+1. Accept the license and download `gemma-3-1b-it-Q4_K_M.gguf` (~769 MB) from
    [huggingface.co/litert-community/Gemma3-1B-IT](https://huggingface.co/litert-community/Gemma3-1B-IT)
    — one-time, per build machine (the file is license-gated and git-ignored).
 2. Drop the file into `assets/models/` (exact name as above — see
-   `assets/models/README.md`).
-3. Rebuild the APK (`flutter build apk`). On first chat the app auto-installs
-   the bundled model — no Hugging Face token, no network.
+   `assets/models/README.md`, or run `./tools/fetch_model.sh hf_YOUR_TOKEN`).
+3. Rebuild the APK (`flutter build apk`). On first chat the app copies the
+   model from the APK into app storage (seconds) and llama.cpp loads it —
+   Vulkan GPU offload is used when the device supports it.
 
-If the file is missing at build time the APK still builds; the app falls back
-to the in-app download flow (Settings → On-device AI → HF token + download).
+If the file is missing at build time the APK still builds; on-device AI
+reports that the model is not included and chat uses the WeatherGPT backend.
+
+Requirements: Android 8.0+ (minSdk 26), ~1.5 GB free RAM while the model is
+loaded.
