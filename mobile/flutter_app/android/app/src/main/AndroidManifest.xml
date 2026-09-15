@@ -5,17 +5,17 @@
     <!-- Speech-to-text: mic capture + voice recognition query support -->
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-feature android:name="android.hardware.microphone" android:required="false"/>
-    <!-- On-device LLM (flutter_gemma MediaPipe engine): GPU backend needs
-         OpenCL. Required=false so devices without it fall back to CPU. -->
-    <uses-native-library android:name="libvndksupport.so" android:required="false"/>
-    <uses-native-library android:name="libOpenCL.so" android:required="false"/>
-    <uses-native-library android:name="libOpenCL-car.so" android:required="false"/>
-    <uses-native-library android:name="libOpenCL-pixel.so" android:required="false"/>
     <application
         android:label="weathergpt"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true">
+        <!-- On-device LLM (flutter_gemma MediaPipe engine): GPU backend needs
+             OpenCL. Required=false so devices without it fall back to CPU. -->
+        <uses-native-library android:name="libvndksupport.so" android:required="false"/>
+        <uses-native-library android:name="libOpenCL.so" android:required="false"/>
+        <uses-native-library android:name="libOpenCL-car.so" android:required="false"/>
+        <uses-native-library android:name="libOpenCL-pixel.so" android:required="false"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

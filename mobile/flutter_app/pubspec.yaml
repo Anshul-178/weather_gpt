@@ -32,3 +32,10 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  # Bundled on-device AI model (Gemma 3 1B int4 .task, ~0.5 GB).
+  # The actual .task file is NOT committed to git — see assets/models/README.md
+  # for the one-time manual step of dropping it here before building the APK.
+  # If the file is missing, the app falls back to the in-app download flow.
+  assets:
+    - assets/models/

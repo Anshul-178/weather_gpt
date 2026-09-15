@@ -43,3 +43,8 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Bundled on-device AI model (~0.5 GB, license-gated) — fetched manually per
+# machine; see assets/models/README.md. The folder itself stays in git so the
+# pubspec asset entry always resolves.
+assets/models/*.task

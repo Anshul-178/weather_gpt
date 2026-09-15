@@ -1,9 +1,13 @@
 // On-device AI: Gemma 3 1B (int4, ~0.5 GB) runs locally via flutter_gemma.
 //
-// Designed for phones with 4–6 GB RAM: the model is downloaded once, stored in
-// app-private storage, and loaded into ~1.5–2 GB of RAM at inference time.
-// No API key is needed at inference; the model file itself is license-gated on
-// Hugging Face, so a free HF token is required once for the download.
+// The model ships BUNDLED inside the APK (assets/models/) when the .task file
+// is present at build time — installation happens on-device in seconds on
+// first use, with no network access and no Hugging Face token. If the file
+// was not bundled into a given build, the service falls back to downloading
+// from Hugging Face (license-gated; a free HF token must be saved).
+//
+// Designed for phones with 4–6 GB RAM: the model is stored in app-private
+// storage and loaded into ~1.5–2 GB of RAM at inference time.
 //
 // All values in the prompt come from the WeatherGPT backend's weather data —
 // the on-device model only phrases the answer, it never invents numbers.
@@ -24,7 +28,15 @@ const String kLocalModelUrl =
 const String kLocalModelId =
     'Gemma3-1B-IT_multi-prefill-seq_q4_block128_ekv1280.task';
 
-const String kLocalModelLabel = 'Gemma 3 1B (int4) · ~0.5 GB';
+/// Where the model ships inside the APK (bundled asset).
+///
+/// When this asset is present at build time, the model is "installed" from
+/// the APK on first use — seconds, offline, no Hugging Face token needed.
+/// The .task file is not committed to git (0.5 GB, license-gated); see
+/// assets/models/README.md for the one-time manual step per build machine.
+const String kLocalModelAssetPath = 'assets/models/$kLocalModelId';
+
+const String kLocalModelLabel = 'Gemma 3 1B (int4) · built into the app';
 
 /// Keys for persisted preferences.
 const String _kLocalAiEnabled = 'local_ai_enabled';
@@ -94,12 +106,50 @@ class LocalAiService {
   Future<bool> isModelDownloaded() =>
       FlutterGemma.isModelInstalled(kLocalModelId);
 
-  /// Download the model with progress callback (0–100).
+  /// Download the model from Hugging Face (fallback only — used when the
+  /// model is not bundled in the APK). Needs a token and license acceptance.
   Future<void> downloadModel(void Function(int progress) onProgress) async {
     await FlutterGemma.installModel(
       modelType: ModelType.gemmaIt,
       fileType: ModelFileType.task,
     ).fromNetwork(kLocalModelUrl, token: _hfToken).withProgress(onProgress).install();
+  }
+
+  /// Install the model that ships inside the APK (assets/models/).
+  ///
+  /// Instant, offline, no token: flutter_gemma copies the bundled .task file
+  /// into app storage and marks it active. No-ops when already installed.
+  /// Throws if the asset was not bundled into this build (e.g. the .task file
+  /// was missing when the APK was built) or the copy fails.
+  Future<void> installBundledModel() async {
+    await FlutterGemma.installModel(
+      modelType: ModelType.gemmaIt,
+      fileType: ModelFileType.task,
+    ).fromAsset(kLocalModelAssetPath).install();
+  }
+
+  /// Make sure the model is available in app storage, then return.
+  ///
+  /// Order of preference:
+  /// 1. Already installed (previous run, or copied from a previous APK).
+  /// 2. Bundled in this APK (assets/models/) — installs locally in seconds.
+  /// 3. Download from Hugging Face — only when a token has been saved
+  ///    (license-gated; requires accepting the Gemma license on HF first).
+  Future<void> ensureModelInstalled() async {
+    if (await isModelDownloaded()) return;
+    try {
+      await installBundledModel();
+      return;
+    } catch (_) {
+      // Bundled asset not present in this build — fall through.
+    }
+    if (_hfToken == null) {
+      throw StateError(
+        'Model not available in this build and no Hugging Face token saved '
+        'for the fallback download.',
+      );
+    }
+    await downloadModel((_) {});
   }
 
   /// Delete the downloaded model file.
@@ -108,14 +158,12 @@ class LocalAiService {
     await FlutterGemma.uninstallModel(kLocalModelId);
   }
 
-  /// Load the model into memory (if downloaded). Throws if the model is not
-  /// installed or cannot be loaded.
+  /// Load the model into memory (installing it first if needed). Throws if
+  /// the model is not installed and cannot be installed.
   Future<void> ensureModelLoaded() async {
     await init();
     if (_model != null) return;
-    if (!await isModelDownloaded()) {
-      throw StateError('Model not downloaded yet');
-    }
+    await ensureModelInstalled();
     _model = await FlutterGemma.getActiveModel(maxTokens: 1024);
   }
 

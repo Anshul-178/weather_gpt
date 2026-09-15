@@ -52,13 +52,10 @@ class AppConfig {
     // By default both debug and release builds use the deployed Render
     // backend. Debug builds only fall back to a local development backend
     // when you opt in with --dart-define=API_BASE_URL=<local url>.
-    if (kIsWeb ||
-        Platform.isWindows ||
-        Platform.isMacOS ||
-        Platform.isLinux) {
-      return 'https://weather-gpt-pc49.onrender.com';
+    if (kIsWeb || Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
+      return " https://weather-gpt-y55v.onrender.com";
     }
-    return 'https://weather-gpt-pc49.onrender.com';
+    return " https://weather-gpt-y55v.onrender.com";
   }
 
   // Generous timeout: Render's free tier sleeps when idle, and a cold start
